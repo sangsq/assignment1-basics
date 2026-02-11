@@ -10,6 +10,13 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 
+# import realizations
+from assign.tokenization import *
+
+
+
+
+
 def run_linear(
     d_in: int,
     d_out: int,
@@ -559,7 +566,8 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    tokenizer = Tokenizer(vocab, merges, special_tokens)
+    return tokenizer
 
 
 def run_train_bpe(
@@ -589,4 +597,10 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    with open(input_path, "r", encoding="utf-8") as f:
+        text = f.read()
+    pre_tokens = pre_tokenization(text, PAT, special_tokens)
+    vocab, merges = construct_bpe(pre_tokens, vocab_size, special_tokens)
+    return vocab, merges
+    
