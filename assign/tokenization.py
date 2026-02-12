@@ -1,18 +1,19 @@
-# return counts of pre_tokens as a dictionary
+from __future__ import annotations
 import regex as re
 from collections import defaultdict
 
 def pre_tokenization(text: str, PAT: str, special_tokens: list[str]) -> dict[str]:
     i = 0
     pre_tokens_str = defaultdict(int)
-    st_PAT = "|".join([re.escape(x) for x in special_tokens])
-    for st_match in re.finditer(st_PAT, text):
-        j = st_match.start()
-        ss = text[i:j]
-        for match in re.finditer(PAT, ss):
-            word = match.group()
-            pre_tokens_str[word] += 1
-        i = st_match.end()
+    if special_tokens:
+        st_PAT = "|".join([re.escape(x) for x in special_tokens])
+        for st_match in re.finditer(st_PAT, text):
+            j = st_match.start()
+            ss = text[i:j]
+            for match in re.finditer(PAT, ss):
+                word = match.group()
+                pre_tokens_str[word] += 1
+            i = st_match.end()
     ss = text[i:]
     for match in re.finditer(PAT, ss):
         word = match.group()
@@ -83,9 +84,11 @@ def construct_bpe(pre_tokens_str: dict[str],  vocab_size: int, special_tokens: l
     for i in range(256):
         vocab[token_id] = bytes([i])
         token_id += 1
-    for t in special_tokens:
-        vocab[token_id] = t.encode("utf-8")
-        token_id += 1
+    
+    if special_tokens:
+        for t in special_tokens:
+            vocab[token_id] = t.encode("utf-8")
+            token_id += 1
     
 
     # construct initial bytes-pair count
@@ -130,7 +133,14 @@ class Tokenizer():
         for i in range(len(merges)):
             self.merges[merges[i]] = i
         
-        self.st_PAT = "|".join([re.escape(x) for x in special_tokens])
+        # check whether special token list is empty
+        if special_tokens:
+            special_tokens.sort(key=len, reverse=True) # sort special token list in descending-in-length order
+            self.st_PAT = "|".join([re.escape(x) for x in special_tokens])
+        else:
+            self.st_PAT = None
+        self.special_tokens = special_tokens
+
         if PAT:
             self.PAT = PAT
         else:
@@ -143,15 +153,16 @@ class Tokenizer():
         word = tuple(bytes([b]) for b in bs)
 
         while True:
-            matches = []
+            matches = set()
             for i in range(len(word)-1):
-                bp = word[i] + word[i+1]
+                bp = (word[i], word[i+1])
                 if bp in self.merges:
-                    matches.append((self.merges[bp], bp, i))
+                    matches.add((self.merges[bp], bp, i))
             if not matches:
                 break
-            bp, i = min(matches)[1:2]
-            word = word[:i] + (bp,) + word[i+2:]
+            tmp = min(matches)
+            _, bp, i = tmp
+            word = word[:i] + (bp[0]+bp[1],) + word[i+2:]
         
         return [self.token2id[t] for t in word]
     
@@ -161,21 +172,29 @@ class Tokenizer():
         result = []
 
         i = 0
-        for st_match in re.finditer(self.st_PAT, s):
-            j = st_match.start()
-            ss = s[i:j]
-            for match in re.finditer(self.PAT, ss):
-                bs = match.group().encode("utf-8")
-                result.extend(self._encode_pretoken(bs))
-            st_bs = st_match.group().encode("utf-8")
-            result.append(self.token2id[st_bs])
-            i = st_match.end()
+        if self.special_tokens:
+            for st_match in re.finditer(self.st_PAT, s):
+                j = st_match.start()
+                ss = s[i:j]
+                for match in re.finditer(self.PAT, ss):
+                    bs = match.group().encode("utf-8")
+                    result.extend(self._encode_pretoken(bs))
+                st_bs = st_match.group().encode("utf-8")
+                result.append(self.token2id[st_bs])
+                i = st_match.end()
         ss = s[i:]
         for match in re.finditer(self.PAT, ss):
             bs = match.group().encode("utf-8")
             result.extend(self._encode_pretoken(bs))
         return result
     
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        for s in iterable:
+            id_list = self.encode(s)
+            for i in id_list:
+                yield i
+
+    
     def decode(self, token_ids):
-        text = b"".join(self.id2token[i] for i in token_ids).decode("utf-8")
+        text = b"".join(self.id2token[i] for i in token_ids).decode("utf-8", errors='replace')
         return text
