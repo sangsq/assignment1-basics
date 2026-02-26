@@ -160,4 +160,9 @@ cython_debug/
 #.idea/
 
 .ruff_cache/
+
+# Data
+data/
 *.zip
+tokenizers/tiny-stories-v2-gpt4-train_encoded_text.pt
+tokenizers/tiny-stories-v2-gpt4-train_tokenizer.pt

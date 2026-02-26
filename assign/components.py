@@ -1,6 +1,7 @@
 from __future__ import annotations
 import torch
 from einops import rearrange, einsum
+import numpy as np
 from math import cos, pi
 
 Module = torch.nn.Module
@@ -280,4 +281,26 @@ def gradient_clipping(params, M, eps=1e-6):
             if p.grad is not None:
                 p.grad *= M / (tmp + eps)     
         
-        
+
+def data_loader(seq, context_length, batch_size, device):
+    n = len(seq)
+    tmp = np.empty(shape=(batch_size, context_length+1), dtype=np.int64)
+    for i in range(batch_size):
+        idx = np.random.randint(0, n-context_length)
+        tmp[i, :] = seq[idx:idx+context_length+1]
+    tmpp = torch.Tensor(tmp, device=device)
+    return tmpp[:, :-1], tmpp[:, 1:]
+
+
+def save_checkpoint(model, optimizer, iteration, out):
+    d = dict()
+    d['model_state'] = model.state_dict()
+    d['optimizer_state'] = optimizer.state_dict()
+    d['iteration'] = iteration
+    torch.save(d, out)
+
+def load_checkpoint(src, model: Module, optimizer: Optimizer):
+    d = torch.load(src)
+    model.load_state_dict(d['model_state'])
+    optimizer.load_state_dict(d['optimizer_state'])
+    return d['iteration']

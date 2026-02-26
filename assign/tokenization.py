@@ -1,10 +1,12 @@
 from __future__ import annotations
 import regex as re
 from collections import defaultdict
+from typing import Iterable, Iterator
 
-def pre_tokenization(text: str, PAT: str, special_tokens: list[str]) -> dict[str]:
+def pre_tokenization(text: str, PAT: str, special_tokens: list[str], pre_tokens_str=None) -> dict[str]:
     i = 0
-    pre_tokens_str = defaultdict(int)
+    if pre_tokens_str is None:
+        pre_tokens_str = defaultdict(int)
     if special_tokens:
         st_PAT = "|".join([re.escape(x) for x in special_tokens])
         for st_match in re.finditer(st_PAT, text):
@@ -168,7 +170,7 @@ class Tokenizer():
     
     
     # turn a string without special token into pre-token list
-    def encode(self, s):
+    def encode(self, s : str) -> list[int]:
         result = []
 
         i = 0
@@ -195,6 +197,6 @@ class Tokenizer():
                 yield i
 
     
-    def decode(self, token_ids):
+    def decode(self, token_ids: Iterable[int]) -> str:
         text = b"".join(self.id2token[i] for i in token_ids).decode("utf-8", errors='replace')
         return text
