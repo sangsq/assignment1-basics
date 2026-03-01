@@ -90,14 +90,15 @@ class RoPE(Module):
         self.d_k = d_k
         # construct rotaion matrices
         I = torch.arange(max_seq_len)
-        self.weight = torch.zeros(d_k//2, max_seq_len, 2, 2, device=device)
+        weight = torch.zeros(d_k//2, max_seq_len, 2, 2, device=device)
         for k in range(d_k//2):
-            w = self.weight
+            w = weight
             angle = I / theta**(2*k/d_k)
             w[k, :, 0, 0] = torch.cos(angle)
             w[k, :, 1, 1] = torch.cos(angle)
             w[k, :, 0, 1] =-torch.sin(angle)
             w[k, :, 1, 0] = torch.sin(angle)
+        self.register_buffer('weight', weight)
 
     def forward(self, x: torch.Tensor, token_positions=None):
         tmp = []
@@ -114,17 +115,19 @@ class RoPE(Module):
     
 # softmax along dimension dim
 def softmax(x: torch.Tensor, dim: int):
-    x -= x.max(dim=dim, keepdim=True).values
-    x = torch.exp(x)
-    x /= x.sum(dim=dim, keepdim=True)
-    return x
+    x_max = x.max(dim=dim, keepdim=True).values
+    x_shifted = x - x_max
+    z = torch.exp(x_shifted)
+    z_sum = z.sum(dim=dim, keepdim=True)
+    z_out = z / z_sum
+    return z_out
 
 
 def attention(Q, K, V, mask=None):
     d_k = Q.size(-1)
     X = einsum(Q, K, "... i d_k, ... j d_k -> ... i j") / torch.sqrt(torch.tensor(d_k))
     if mask is not None:
-        X[..., ~mask] -= torch.inf
+        X = X.masked_fill(~mask, -torch.inf)
     X = softmax(X, -1)
     return einsum(X, V, "... i j, ... j k -> ... i k")
 
@@ -139,7 +142,7 @@ class MultiHeadAttention(Module):
             self.rope = RoPE(theta, d_k, max_seq_len, device=device)
         else:
             self.rope = None
-        self.mask = torch.tril(torch.ones((max_seq_len, max_seq_len), dtype=torch.bool, device=device))
+        self.register_buffer('mask', torch.tril(torch.ones((max_seq_len, max_seq_len), dtype=torch.bool, device=device)))
         self.weight = Parameter(torch.empty(3, num_heads * d_k, d_model, device=device))
         self.proj = Linear(num_heads * d_k, d_model)
         self.reset_parameters()
@@ -232,8 +235,8 @@ class AdamW(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                self.state[p]['m'] = torch.zeros(p.shape, dtype=p.dtype)
-                self.state[p]['v'] = torch.zeros(p.shape)
+                self.state[p]['m'] = torch.zeros(p.shape, dtype=p.dtype, device=p.device)
+                self.state[p]['v'] = torch.zeros(p.shape, dtype=p.dtype, device=p.device)
                 self.state[p]['t'] = 1
     
     @torch.no_grad()
@@ -288,7 +291,7 @@ def data_loader(seq, context_length, batch_size, device):
     for i in range(batch_size):
         idx = np.random.randint(0, n-context_length)
         tmp[i, :] = seq[idx:idx+context_length+1]
-    tmpp = torch.Tensor(tmp, device=device)
+    tmpp = torch.tensor(tmp, device=device)
     return tmpp[:, :-1], tmpp[:, 1:]
 
 
@@ -298,6 +301,7 @@ def save_checkpoint(model, optimizer, iteration, out):
     d['optimizer_state'] = optimizer.state_dict()
     d['iteration'] = iteration
     torch.save(d, out)
+
 
 def load_checkpoint(src, model: Module, optimizer: Optimizer):
     d = torch.load(src)
