@@ -12,7 +12,6 @@ dependencies = [
     "torch~=2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'", # Intel Macs
     "tqdm>=4.67.1",      # BPE merge progress
     "matplotlib>=3.10.8",# scripts/plot_loss.py
-    "wandb>=0.19.7",     # optional --wandb-project logging, imported lazily
     "setuptools",        # triton imports it at runtime; without it torch.compile fails
 ]
 

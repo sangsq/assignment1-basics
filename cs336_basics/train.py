@@ -73,8 +73,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     g.add_argument("--eval-batches", type=int, default=20)
     g.add_argument("--save-every", type=int, default=2000)
     g.add_argument("--resume", action="store_true", help="continue from <out>/last.pt if present")
-    g.add_argument("--wandb-project", default=None, help="enable Weights & Biases logging")
-    g.add_argument("--wandb-run", default=None)
 
     return p.parse_args(argv)
 
@@ -136,12 +134,6 @@ def main(argv=None) -> None:
         else torch.autocast(device_type="cpu", enabled=False)
     )
 
-    run = None
-    if args.wandb_project:
-        import wandb
-
-        run = wandb.init(project=args.wandb_project, name=args.wandb_run, config=vars(args))
-
     log_path = args.out / "metrics.jsonl"
     best_val = math.inf
     net.train()
@@ -177,16 +169,12 @@ def main(argv=None) -> None:
                   f"{rec['tokens_per_sec']/1e3:.0f}k tok/s")
             with log_path.open("a") as f:
                 f.write(json.dumps(rec) + "\n")
-            if run:
-                run.log(rec, step=step)
 
         if step % args.eval_every == 0 or step == args.max_steps:
             val = evaluate(net, valid_data, args, autocast)
             print(f"step {step:6d} | valid loss {val:.4f}")
             with log_path.open("a") as f:
                 f.write(json.dumps({"step": step, "valid_loss": val}) + "\n")
-            if run:
-                run.log({"valid_loss": val}, step=step)
             if val < best_val:
                 best_val = val
                 save_checkpoint(model, optimizer, step, args.out / "best.pt")
@@ -196,8 +184,6 @@ def main(argv=None) -> None:
 
     save_checkpoint(model, optimizer, args.max_steps, args.out / "last.pt")
     print(f"done. best valid loss {best_val:.4f} -> {args.out/'best.pt'}")
-    if run:
-        run.finish()
 
 
 if __name__ == "__main__":

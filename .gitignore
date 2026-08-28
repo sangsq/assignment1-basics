@@ -47,6 +47,5 @@ checkpoints/
 # Run outputs
 logs/
 runs/
-wandb/
 *.log
 test_results.xml
