@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from heapq import heapify, heappop, heappush
 from multiprocessing import Pool
 from pathlib import Path
 
+import numpy as np
 import regex as re
 
 from cs336_basics.pretokenization_example import find_chunk_boundaries
@@ -91,6 +92,50 @@ def pretokenize_file(
     return counts
 
 
+_ENCODER: Tokenizer | None = None
+
+
+def _encode_init(vocab, merges, special_tokens) -> None:
+    global _ENCODER
+    _ENCODER = Tokenizer(vocab, merges, special_tokens)
+
+
+def _encode_chunk(args: tuple[str, int, int]) -> np.ndarray:
+    """Worker: encode one byte range of a file to a uint16 array of token ids."""
+    path, start, end = args
+    with open(path, "rb") as f:
+        f.seek(start)
+        text = f.read(end - start).decode("utf-8", errors="ignore")
+    return np.asarray(_ENCODER.encode(text), dtype=np.uint16)
+
+
+def encode_file_chunks(
+    tokenizer: Tokenizer,
+    input_path: str | os.PathLike,
+    special_tokens: list[str],
+    num_processes: int | None = None,
+    chunks_per_process: int = 8,
+):
+    """Yield uint16 arrays of token ids, in file order, encoded in parallel.
+
+    Chunks are cut on special-token boundaries, so concatenating the results
+    reproduces exactly what encoding the whole file in one call would give.
+    """
+    num_processes = num_processes or (os.cpu_count() or 1)
+    split_token = (special_tokens[0] if special_tokens else "\n").encode("utf-8")
+    with open(input_path, "rb") as f:
+        boundaries = find_chunk_boundaries(f, num_processes * chunks_per_process, split_token)
+    jobs = [(str(input_path), s, e) for s, e in zip(boundaries[:-1], boundaries[1:], strict=True)]
+
+    merges = [m for m, _ in sorted(tokenizer.merges.items(), key=lambda kv: kv[1])]
+    with Pool(
+        num_processes,
+        initializer=_encode_init,
+        initargs=(tokenizer.id2token, merges, special_tokens),
+    ) as pool:
+        yield from pool.imap(_encode_chunk, jobs)  # imap preserves order
+
+
 # --------------------------------------------------------------------------- #
 # BPE training
 # --------------------------------------------------------------------------- #
@@ -116,6 +161,7 @@ def construct_bpe(
     pre_tokens_str: dict[str, int],
     vocab_size: int,
     special_tokens: list[str],
+    progress: bool = False,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """Learn BPE merges from pre-token counts.
 
@@ -148,6 +194,11 @@ def construct_bpe(
     heapify(heap)
 
     merges: list[tuple[bytes, bytes]] = []
+    bar = None
+    if progress:
+        from tqdm.auto import tqdm
+
+        bar = tqdm(total=vocab_size - len(vocab), desc="merges", unit="merge")
     while len(vocab) < vocab_size:
         # Pop until we find an entry whose count is still current (lazy deletion).
         best = None
@@ -165,37 +216,42 @@ def construct_bpe(
         vocab[token_id] = merged
         token_id += 1
 
-        for wi in list(pair_words[best]):
+        for wi in pair_words[best]:
             word = words[wi]
             freq = freqs[wi]
-            new_word: list[bytes] = []
-            i, n = 0, len(word)
-            while i < n:
-                if i < n - 1 and word[i] == left and word[i + 1] == right:
-                    new_word.append(merged)
-                    i += 2
-                else:
-                    new_word.append(word[i])
+            i = 0
+            while i < len(word) - 1:
+                if word[i] != left or word[i + 1] != right:
                     i += 1
-            if len(new_word) == n:
-                continue
-
-            old_pairs = Counter(zip(word, word[1:], strict=False))
-            new_pairs = Counter(zip(new_word, new_word[1:], strict=False))
-            for pair in old_pairs.keys() | new_pairs.keys():
-                delta = (new_pairs[pair] - old_pairs[pair]) * freq
-                if delta:
-                    pair_counts[pair] += delta
-                    heappush(heap, (-pair_counts[pair], _MaxPair(pair), pair))
-                if new_pairs[pair]:
-                    pair_words[pair].add(wi)
-                else:
-                    pair_words[pair].discard(wi)
-            words[wi] = new_word
+                    continue
+                # Only the two pairs straddling the merge site change. Splice in
+                # place so the left neighbour already reflects earlier merges in
+                # this same word.
+                if i > 0:
+                    prev = word[i - 1]
+                    pair_counts[prev, left] -= freq
+                    heappush(heap, (-pair_counts[prev, left], _MaxPair((prev, left)), (prev, left)))
+                    pair_counts[prev, merged] += freq
+                    heappush(heap, (-pair_counts[prev, merged], _MaxPair((prev, merged)), (prev, merged)))
+                    pair_words[prev, merged].add(wi)
+                if i + 2 < len(word):
+                    nxt = word[i + 2]
+                    pair_counts[right, nxt] -= freq
+                    heappush(heap, (-pair_counts[right, nxt], _MaxPair((right, nxt)), (right, nxt)))
+                    pair_counts[merged, nxt] += freq
+                    heappush(heap, (-pair_counts[merged, nxt], _MaxPair((merged, nxt)), (merged, nxt)))
+                    pair_words[merged, nxt].add(wi)
+                pair_counts[best] -= freq
+                word[i : i + 2] = (merged,)
+                i += 1
 
         pair_counts.pop(best, None)
         pair_words.pop(best, None)
+        if bar is not None:
+            bar.update(1)
 
+    if bar is not None:
+        bar.close()
     return vocab, merges
 
 
@@ -204,10 +260,11 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
     num_processes: int | None = None,
+    progress: bool = False,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """Train a byte-level BPE tokenizer straight from a corpus on disk."""
     pre_tokens = pretokenize_file(input_path, special_tokens, num_processes)
-    return construct_bpe(pre_tokens, vocab_size, special_tokens)
+    return construct_bpe(pre_tokens, vocab_size, special_tokens, progress=progress)
 
 
 # --------------------------------------------------------------------------- #

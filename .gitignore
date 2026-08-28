@@ -186,3 +186,6 @@ checkpoints/
 runs/
 wandb/
 test_results.xml
+
+# Run logs
+logs/

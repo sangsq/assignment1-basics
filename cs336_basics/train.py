@@ -98,6 +98,8 @@ def main(argv=None) -> None:
     args.cosine_steps = args.cosine_steps or args.max_steps
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    # TF32 for the fp32 matmuls that autocast leaves alone.
+    torch.set_float32_matmul_precision("high")
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "config.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()}, indent=2))
