@@ -18,7 +18,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3.4",
-    "ruff>=0.16",        # pinned so CI lint does not drift with new releases
+    "ruff>=0.16",        # pinned so lint results do not drift with new releases
     "tiktoken>=0.9.0",   # tokenizer tests cross-check against it
     "jaxtyping>=0.3.0",  # shape annotations in tests/adapters.py
     "psutil>=6.1.1",     # memory-limit tests
