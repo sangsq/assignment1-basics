@@ -1,8 +1,10 @@
 from __future__ import annotations
-import torch
-from einops import rearrange, einsum
-import numpy as np
+
 from math import cos, pi
+
+import numpy as np
+import torch
+from einops import einsum, rearrange
 
 Module = torch.nn.Module
 Parameter = torch.nn.Parameter
@@ -69,13 +71,13 @@ def silu(x): return x * torch.sigmoid(x)
 
 
 class SwiGLU(Module):
-    def __init__(self, d_model, d_ff=None):
+    def __init__(self, d_model, d_ff=None, device=None, dtype=None):
         super().__init__()
         if not d_ff:
             d_ff = d_model * 8 // 3
-        self.w1 = Linear(d_model, d_ff)
-        self.w2 = Linear(d_ff, d_model)
-        self.w3 = Linear(d_model, d_ff)
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
     
     def forward(self, x):
         y = self.w1(x)
@@ -111,8 +113,8 @@ class RoPE(Module):
             x_k = einsum(w_k, x_k, "... seq i j, ... seq j -> ... seq i")
             tmp.append(x_k)
         return torch.cat(tmp, dim=-1)
-    
-    
+
+
 # softmax along dimension dim
 def softmax(x: torch.Tensor, dim: int):
     x_max = x.max(dim=dim, keepdim=True).values
@@ -133,7 +135,7 @@ def attention(Q, K, V, mask=None):
 
 
 class MultiHeadAttention(Module):
-    def __init__(self, d_model, num_heads, theta, max_seq_len, device=None):
+    def __init__(self, d_model, num_heads, theta, max_seq_len, device=None, dtype=None):
         super().__init__()
         self.num_heads = num_heads
         self.d_model = d_model
@@ -143,8 +145,8 @@ class MultiHeadAttention(Module):
         else:
             self.rope = None
         self.register_buffer('mask', torch.tril(torch.ones((max_seq_len, max_seq_len), dtype=torch.bool, device=device)))
-        self.weight = Parameter(torch.empty(3, num_heads * d_k, d_model, device=device))
-        self.proj = Linear(num_heads * d_k, d_model)
+        self.weight = Parameter(torch.empty(3, num_heads * d_k, d_model, device=device, dtype=dtype))
+        self.proj = Linear(num_heads * d_k, d_model, device=device, dtype=dtype)
         self.reset_parameters()
     
     def reset_parameters(self):
@@ -152,8 +154,8 @@ class MultiHeadAttention(Module):
         torch.nn.init.trunc_normal_(self.weight, std=std, a=-3*std, b=3*std)
 
     def forward(self, x, token_pos):
-        l = x.size(-2)
-        mask = self.mask[:l, :l]
+        seq_len = x.size(-2)
+        mask = self.mask[:seq_len, :seq_len]
         x = einsum(self.weight, x, 'qkv i j, ... j -> qkv ... i')
         Q, K, V = x[0, ...], x[1, ...], x[2, ...]
         d_k = self.d_model // self.num_heads
@@ -169,17 +171,17 @@ class MultiHeadAttention(Module):
         x = torch.cat(tmp, dim=-1)
         x = self.proj(x)
         return x
-        
+
 
 class TransformerBlock(Module):
-    def __init__(self, d_model, num_heads, d_ff, theta, max_seq_len):
+    def __init__(self, d_model, num_heads, d_ff, theta, max_seq_len, device=None, dtype=None):
         super().__init__()
         self.num_heads = num_heads
         self.d_model = d_model
-        self.ffn = SwiGLU(d_model, d_ff)
-        self.rmsnorm1 = RMSNorm(d_model)
-        self.rmsnorm2 = RMSNorm(d_model)
-        self.attn = MultiHeadAttention(d_model, num_heads, theta, max_seq_len)
+        self.ffn = SwiGLU(d_model, d_ff, device=device, dtype=dtype)
+        self.rmsnorm1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.rmsnorm2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.attn = MultiHeadAttention(d_model, num_heads, theta, max_seq_len, device=device, dtype=dtype)
 
     def forward(self, x, token_positions):
         y = self.rmsnorm1(x)
@@ -199,14 +201,18 @@ class transformerLM(Module):
                 num_layers: int,
                 num_heads: int,
                 d_ff: int,
-                theta: float):
+                theta: float,
+                device=None,
+                dtype=None):
         super().__init__()
-        self.in_embed = Embedding(vocab_size, d_model)
+        self.in_embed = Embedding(vocab_size, d_model, device=device, dtype=dtype)
         self.layers = ModuleList()
         for _ in range(num_layers):
-            self.layers.append(TransformerBlock(d_model, num_heads, d_ff, theta, context_length))
-        self.norm = RMSNorm(d_model)
-        self.out_embed = Linear(d_model, vocab_size)
+            self.layers.append(
+                TransformerBlock(d_model, num_heads, d_ff, theta, context_length, device=device, dtype=dtype)
+            )
+        self.norm = RMSNorm(d_model, device=device, dtype=dtype)
+        self.out_embed = Linear(d_model, vocab_size, device=device, dtype=dtype)
         
     def forward(self, x, token_pos=None):
         x = self.in_embed(x)
@@ -218,12 +224,14 @@ class transformerLM(Module):
         return x
         
 
-def cross_entropy_loss(x:torch.Tensor, targets):
-    x -= x.max(dim=-1, keepdim=True).values
+def cross_entropy_loss(x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """Mean cross-entropy over every leading dimension. `x` is left untouched."""
+    # Out-of-place: `x` is a live node in the autograd graph, subtracting in
+    # place would corrupt the caller's logits.
+    x = x - x.max(dim=-1, keepdim=True).values
     logsumexp = torch.log(x.exp().sum(dim=-1))
     x_target = torch.gather(x, dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
-    x = logsumexp - x_target
-    return x.mean(dim=0)
+    return (logsumexp - x_target).mean()
 
     
 class AdamW(Optimizer):
@@ -274,33 +282,41 @@ def get_lr_cosine_schedule(t, alpha_max, alpha_min, T_w, T_c):
 
 @torch.no_grad()
 def gradient_clipping(params, M, eps=1e-6):
-    tmp = torch.tensor(0.0)
-    for p in params:
-        if p.grad is not None:
-            tmp += p.grad.pow(2).sum()
-    tmp = tmp.pow(0.5)
-    if tmp > M:
-        for p in params:
-            if p.grad is not None:
-                p.grad *= M / (tmp + eps)     
+    # Materialise once: `params` is usually a generator, and the old two-pass
+    # version silently scaled nothing because the second pass saw an empty one.
+    grads = [p.grad for p in params if p.grad is not None]
+    if not grads:
+        return
+    # Accumulate on the gradients' own device; a CPU scalar seed raises here on CUDA.
+    total_norm = torch.sqrt(sum(g.pow(2).sum() for g in grads))
+    if total_norm > M:
+        scale = M / (total_norm + eps)
+        for g in grads:
+            g *= scale
         
 
-def data_loader(seq, context_length, batch_size, device):
+def data_loader(seq, context_length, batch_size, device, rng=None):
+    """Sample a batch of (input, target) windows uniformly at random.
+
+    Pass `rng` (a np.random.Generator) to make a batch reproducible, e.g. so
+    validation is measured on the same windows at every eval step.
+    """
     n = len(seq)
-    tmp = np.empty(shape=(batch_size, context_length+1), dtype=np.int64)
-    for i in range(batch_size):
-        idx = np.random.randint(0, n-context_length)
-        tmp[i, :] = seq[idx:idx+context_length+1]
+    starts = (rng or np.random).integers(0, n - context_length, size=batch_size) \
+        if rng is not None else np.random.randint(0, n - context_length, size=batch_size)
+    tmp = np.empty(shape=(batch_size, context_length + 1), dtype=np.int64)
+    for i, idx in enumerate(starts):
+        tmp[i, :] = seq[idx:idx + context_length + 1]
     tmpp = torch.tensor(tmp, device=device)
     return tmpp[:, :-1], tmpp[:, 1:]
 
 
 def save_checkpoint(model, optimizer, iteration, out):
-    d = dict()
-    d['model_state'] = model.state_dict()
-    d['optimizer_state'] = optimizer.state_dict()
-    d['iteration'] = iteration
-    torch.save(d, out)
+    torch.save({
+        'model_state': model.state_dict(),
+        'optimizer_state': optimizer.state_dict(),
+        'iteration': iteration,
+    }, out)
 
 
 def load_checkpoint(src, model: Module, optimizer: Optimizer):

@@ -24,31 +24,6 @@ def pre_tokenization(text: str, PAT: str, special_tokens: list[str], pre_tokens_
 
 
 # update bp count and pre_tokens as a result of bp merge
-def update_bp_count(bp, bp_count, pre_tokens):
-    for ini_word in list(pre_tokens.keys()):
-        i = 0
-        count = pre_tokens[ini_word]
-        word = ini_word
-        # scan through the word to look for the bp. if found, update the word and bp_count influenced by the merge
-        while i < len(word)-1:
-            if word[i]==bp[0] and word[i+1]==bp[1]:
-                if i > 0:
-                    bp_count[(word[i-1], bp[0]+bp[1])] += count
-                    bp_count[(word[i-1], bp[0])] -= count
-                if i+2 < len(word):
-                    bp_count[(bp[0]+bp[1], word[i+2])] += count
-                    bp_count[(bp[1], word[i+2])] -= count
-                bp_count[(bp[0], bp[1])] -= count
-                word = word[:i] + (bp[0]+bp[1],) + word[i+2:]
-            i += 1
-
-        # update tokenization of the pretoken / word
-        if word != ini_word:
-            pre_tokens.pop(ini_word)
-            pre_tokens[word] = count
-
-
-# update bp count and pre_tokens as a result of bp merge
 def _update_bp_count(bp, bp_count, pre_tokens):
     for ini_word in list(pre_tokens.keys()):
         i = 0
@@ -137,7 +112,8 @@ class Tokenizer():
         
         # check whether special token list is empty
         if special_tokens:
-            special_tokens.sort(key=len, reverse=True) # sort special token list in descending-in-length order
+            # Copy before sorting: an in-place .sort() would reorder the caller's list.
+            special_tokens = sorted(special_tokens, key=len, reverse=True)
             self.st_PAT = "|".join([re.escape(x) for x in special_tokens])
         else:
             self.st_PAT = None
