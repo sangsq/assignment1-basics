@@ -1,6 +1,6 @@
 """Plot the training and validation loss curves written by cs336_basics.train.
 
-    uv run python scripts/plot_loss.py checkpoints/owt32k --out docs/loss.png
+    uv run python scripts/plot_loss.py checkpoints/owt32k --out docs/owt_loss.png
 
 Reads <run>/metrics.jsonl, which holds one JSON object per logged step.
 """
