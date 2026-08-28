@@ -6,6 +6,12 @@ __pycache__/
 # C extensions
 *.so
 
+# vscode
+.vscode/
+
+# agent
+.claude/
+
 # Distribution / packaging
 .Python
 build/
@@ -161,9 +167,22 @@ cython_debug/
 
 .ruff_cache/
 
-# Data
+# Data (raw corpora + encoded token arrays live outside the repo; see scripts/)
 data/
 *.zip
-tokenizers/tiny-stories-v2-gpt4-train_encoded_text.pt
-tokenizers/tiny-stories-v2-gpt4-train_tokenizer.pt
-tokenizers/tiny-stories-v2-gpt4-train_encoded_text.npy
+*.gz
+
+# Trained tokenizers and model binaries. Everything here is reproduced by
+# scripts/prepare_data.py, so none of it belongs in git.
+tokenizers/
+*.pt
+*.pth
+*.npy
+!tests/fixtures/**
+!tests/_snapshots/**
+
+# Training outputs
+checkpoints/
+runs/
+wandb/
+test_results.xml
