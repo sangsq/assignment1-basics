@@ -24,7 +24,7 @@ uv run pytest        # 47 passed, 1 xpassed
 | Transformer blocks + LM head | [components.py](cs336_basics/components.py) | pre-norm residual stream |
 | Cross-entropy, AdamW, cosine LR, grad clipping | [components.py](cs336_basics/components.py) | numerically-stable logsumexp |
 | Sampling | [decoding.py](cs336_basics/decoding.py) | temperature, top-k, nucleus (top-p), EOS stop |
-| Training loop | [train.py](cs336_basics/train.py) | memmapped data, bf16 autocast, checkpoint/resume, W&B |
+| Training loop | [train.py](cs336_basics/train.py) | memmapped data, bf16 autocast, `torch.compile`, checkpoint/resume, W&B |
 | PyTorch reference build | [torch_ver.py](cs336_basics/torch_ver.py) | same architecture on stock modules, kept as a correctness reference |
 
 ## Quickstart
@@ -47,17 +47,25 @@ uv run python -m cs336_basics.train \
     --train data/ts_train.npy --valid data/ts_valid.npy \
     --vocab-size 10000 --context-length 256 \
     --d-model 512 --num-layers 4 --num-heads 16 --d-ff 1344 \
-    --batch-size 128 --max-steps 20000 --lr 3e-4 \
+    --batch-size 128 --max-steps 20000 --lr 3e-4 --compile \
     --out checkpoints/ts
 
 # 5. sample
 uv run python scripts/sample.py \
     --checkpoint checkpoints/ts/best.pt --tokenizer tokenizers/ts \
     --prompt "Once upon a time"
+
+# 6. plot the loss curves
+uv run python scripts/plot_loss.py checkpoints/ts
 ```
 
-`--resume` continues from `<out>/last.pt`. Every flag is listed by `--help`, and the
-resolved config is written to `<out>/config.json` next to the checkpoints.
+`--resume` continues from `<out>/last.pt`, `--compile` is worth about 2.4x, and every
+flag is listed by `--help`. Each run writes its resolved config to
+`<out>/config.json` and one JSON record per logged step to `<out>/metrics.jsonl`,
+next to the `best.pt` / `last.pt` checkpoints.
+
+OpenWebText is the same pipeline with `--vocab-size 32000` (what the assignment
+asks for on that corpus) and a larger model.
 
 ## Implementation notes
 
@@ -97,6 +105,7 @@ scripts/
   download_data.sh  fetch TinyStories / OpenWebText
   prepare_data.py   train tokenizer, encode corpus to .npy
   sample.py         generate from a checkpoint
+  plot_loss.py      loss curves from a run's metrics.jsonl
 notebooks/          exploratory analysis (OpenWebText pre-token statistics)
 tests/              CS336 test suite; adapters.py wires it to this implementation
 ```
