@@ -87,34 +87,36 @@ class SwiGLU(Module):
 
 
 class RoPE(Module):
+    """Rotary position embeddings over interleaved (even, odd) channel pairs.
+
+    The rotation is stored as two `(max_seq_len, d_k // 2)` cos/sin tables rather
+    than `d_k // 2` explicit 2x2 matrices, so a forward pass is a handful of
+    elementwise kernels instead of a Python loop over channel pairs.
+    """
+
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
         super().__init__()
         self.d_k = d_k
-        # construct rotaion matrices
-        I = torch.arange(max_seq_len)
-        weight = torch.zeros(d_k//2, max_seq_len, 2, 2, device=device)
-        for k in range(d_k//2):
-            w = weight
-            angle = I / theta**(2*k/d_k)
-            w[k, :, 0, 0] = torch.cos(angle)
-            w[k, :, 1, 1] = torch.cos(angle)
-            w[k, :, 0, 1] =-torch.sin(angle)
-            w[k, :, 1, 0] = torch.sin(angle)
-        self.register_buffer('weight', weight)
+        pos = torch.arange(max_seq_len, dtype=torch.float32, device=device)
+        inv_freq = theta ** (-torch.arange(0, d_k // 2, dtype=torch.float32, device=device) * 2 / d_k)
+        angle = torch.outer(pos, inv_freq)               # (max_seq_len, d_k // 2)
+        self.register_buffer('cos', torch.cos(angle))
+        self.register_buffer('sin', torch.sin(angle))
 
     def forward(self, x: torch.Tensor, token_positions=None):
-        tmp = []
-        for k in range(self.d_k // 2):
-            if token_positions is not None:
-                w_k = self.weight[k, token_positions, :, :]
-            else:
-                w_k = self.weight[k, :x.size(-2), :, :]
-            x_k = x[..., 2*k:2*k+2]
-            x_k = einsum(w_k, x_k, "... seq i j, ... seq j -> ... seq i")
-            tmp.append(x_k)
-        return torch.cat(tmp, dim=-1)
-
-
+        if token_positions is not None:
+            cos = self.cos[token_positions]              # (..., seq, d_k // 2)
+            sin = self.sin[token_positions]
+        else:
+            cos = self.cos[:x.size(-2)]                  # (seq, d_k // 2), broadcasts
+            sin = self.sin[:x.size(-2)]
+        x_even, x_odd = x[..., 0::2], x[..., 1::2]
+        rot_even = x_even * cos - x_odd * sin
+        rot_odd = x_even * sin + x_odd * cos
+        # Re-interleave: stack pairs on a new trailing axis, then fold it back in.
+        return torch.stack((rot_even, rot_odd), dim=-1).flatten(-2)
+    
+    
 # softmax along dimension dim
 def softmax(x: torch.Tensor, dim: int):
     x_max = x.max(dim=dim, keepdim=True).values
@@ -158,20 +160,19 @@ class MultiHeadAttention(Module):
         mask = self.mask[:seq_len, :seq_len]
         x = einsum(self.weight, x, 'qkv i j, ... j -> qkv ... i')
         Q, K, V = x[0, ...], x[1, ...], x[2, ...]
-        d_k = self.d_model // self.num_heads
-        tmp = []
-        for i in range(self.num_heads):
-            Qi = Q[..., i*d_k:(i+1)*d_k]
-            Ki = K[..., i*d_k:(i+1)*d_k]
-            Vi = V[..., i*d_k:(i+1)*d_k]
-            if self.rope:
-                Qi = self.rope(Qi, token_pos)
-                Ki = self.rope(Ki, token_pos)
-            tmp.append(attention(Qi, Ki, Vi, mask))
-        x = torch.cat(tmp, dim=-1)
-        x = self.proj(x)
-        return x
-
+        # Fold the head axis out of the channel dim so every head is attended to
+        # in one batched call, instead of looping over heads in Python.
+        Q, K, V = (rearrange(t, '... s (h d) -> ... h s d', h=self.num_heads) for t in (Q, K, V))
+        if self.rope:
+            # token_pos is (..., seq); give it a singleton head axis so the cos/sin
+            # tables broadcast across heads rather than against the batch dim.
+            pos = token_pos.unsqueeze(-2) if (token_pos is not None and token_pos.dim() > 1) else token_pos
+            Q = self.rope(Q, pos)
+            K = self.rope(K, pos)
+        x = attention(Q, K, V, mask)
+        x = rearrange(x, '... h s d -> ... s (h d)')
+        return self.proj(x)
+        
 
 class TransformerBlock(Module):
     def __init__(self, d_model, num_heads, d_ff, theta, max_seq_len, device=None, dtype=None):
