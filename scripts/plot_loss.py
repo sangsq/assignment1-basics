@@ -21,16 +21,6 @@ TRAIN, VALID = "#2a78d6", "#eb6834"
 SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e3e2dd"
 
 
-def ema(values: list[float], alpha: float) -> list[float]:
-    """Bias-corrected EMA, so the smoothed curve does not lag at the start."""
-    out, acc, w = [], 0.0, 0.0
-    for v in values:
-        acc = alpha * v + (1 - alpha) * acc
-        w = alpha + (1 - alpha) * w
-        out.append(acc / w)
-    return out
-
-
 def load(run: Path) -> tuple[list, list, list, list, list]:
     tr_x, tr_y, va_x, va_y, toks = [], [], [], [], []
     with (run / "metrics.jsonl").open() as f:
@@ -50,7 +40,6 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("run", type=Path, help="training output directory")
     p.add_argument("--out", type=Path, default=None, help="defaults to <run>/loss.png")
-    p.add_argument("--smooth", type=float, default=0.05, help="EMA alpha for the train curve")
     p.add_argument("--title", default=None)
     args = p.parse_args()
     out = args.out or args.run / "loss.png"
@@ -65,15 +54,14 @@ def main() -> None:
     fig.patch.set_facecolor(SURFACE)
     ax.set_facecolor(SURFACE)
 
-    ax.plot([to_b(s) for s in tr_x], tr_y, color=TRAIN, lw=1, alpha=0.18)
-    ax.plot([to_b(s) for s in tr_x], ema(tr_y, args.smooth), color=TRAIN, lw=2, label="train")
+    ax.plot([to_b(s) for s in tr_x], tr_y, color=TRAIN, lw=1, label="train")
     if va_x:
         # Marker so a run with only a couple of eval points still shows something.
         ax.plot([to_b(s) for s in va_x], va_y, color=VALID, lw=2, label="validation",
                 marker="o" if len(va_x) < 30 else None, markersize=4)
 
-    ax.set_xlabel("tokens seen (billions)", color=MUTED, fontsize=10)
-    ax.set_ylabel("cross-entropy loss (nats/token)", color=MUTED, fontsize=10)
+    ax.set_xlabel("tokens (B)", color=MUTED, fontsize=10)
+    ax.set_ylabel("CE loss", color=MUTED, fontsize=10)
     title = args.title or f"OpenWebText — {args.run.name}"
     ax.set_title(title, color=INK, fontsize=13, pad=14, loc="left")
 
