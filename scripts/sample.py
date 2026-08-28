@@ -49,7 +49,9 @@ def main() -> None:
         device=args.device,
     )
     state = torch.load(args.checkpoint, map_location=args.device)
-    model.load_state_dict(state["model_state"])
+    # Tolerate a checkpoint saved through a torch.compile wrapper.
+    weights = {k.removeprefix("_orig_mod."): v for k, v in state["model_state"].items()}
+    model.load_state_dict(weights)
     print(f"loaded step {state['iteration']} from {args.checkpoint}\n")
 
     gen = torch.Generator(device=args.device)

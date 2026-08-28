@@ -80,16 +80,16 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 @torch.no_grad()
-def evaluate(model, data, args, autocast) -> float:
+def evaluate(net, data, args, autocast) -> float:
     """Mean validation loss over a fixed set of windows (same seed every call)."""
-    model.eval()
+    net.eval()
     rng = np.random.default_rng(args.seed)  # fixed -> eval curves are comparable across steps
     total = 0.0
     for _ in range(args.eval_batches):
         x, y = data_loader(data, args.context_length, args.batch_size, args.device, rng=rng)
         with autocast:
-            total += cross_entropy_loss(model(x), y).item()
-    model.train()
+            total += cross_entropy_loss(net(x), y).item()
+    net.train()
     return total / args.eval_batches
 
 
@@ -115,8 +115,10 @@ def main(argv=None) -> None:
     )
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model: {n_params/1e6:.1f}M parameters")
-    if args.compile:
-        model = torch.compile(model)
+    # `net` is what runs; `model` stays the bare module. torch.compile's wrapper
+    # prefixes every state_dict key with "_orig_mod.", so checkpointing through it
+    # would produce files nothing else can load.
+    net = torch.compile(model) if args.compile else model
 
     optimizer = AdamW(
         model.parameters(), lr=args.lr, betas=(args.beta1, args.beta2),
@@ -142,7 +144,7 @@ def main(argv=None) -> None:
 
     log_path = args.out / "metrics.jsonl"
     best_val = math.inf
-    model.train()
+    net.train()
     t0 = time.perf_counter()
     tokens_seen = start_step * args.batch_size * args.context_length
 
@@ -154,7 +156,7 @@ def main(argv=None) -> None:
         x, y = data_loader(train_data, args.context_length, args.batch_size, args.device)
         optimizer.zero_grad(set_to_none=True)
         with autocast:
-            loss = cross_entropy_loss(model(x), y)
+            loss = cross_entropy_loss(net(x), y)
         loss.backward()
         # Clip *after* backward: the original notebook clipped before, so the
         # gradients were still None and nothing was ever scaled.
@@ -179,7 +181,7 @@ def main(argv=None) -> None:
                 run.log(rec, step=step)
 
         if step % args.eval_every == 0 or step == args.max_steps:
-            val = evaluate(model, valid_data, args, autocast)
+            val = evaluate(net, valid_data, args, autocast)
             print(f"step {step:6d} | valid loss {val:.4f}")
             with log_path.open("a") as f:
                 f.write(json.dumps({"step": step, "valid_loss": val}) + "\n")
