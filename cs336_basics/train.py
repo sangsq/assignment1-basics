@@ -1,6 +1,6 @@
 """Train the Transformer LM from the command line.
 
-    uv run python -m cs336_basics.train --train data/ts_train.npy --valid data/ts_valid.npy
+    uv run python -m cs336_basics.train --train data/owt32k_train.npy --valid data/owt32k_valid.npy
 
 Every knob is a flag, the resolved config is written next to the checkpoints,
 and `--resume` picks a run back up from its last checkpoint.
