@@ -11,8 +11,8 @@ from torch import Tensor
 
 
 # import realizations
-from assign.tokenization import *
-from assign.components import *
+from cs336_basics.tokenization import *
+from cs336_basics.components import *
 
 
 
