@@ -1,7 +1,7 @@
 [project]
 name = "cs336_basics"
 version = "1.0.6"
-description = "CS336 Assignment 1"
+description = "A byte-level BPE tokenizer and decoder-only Transformer LM written from primitives"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,10 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.19.7",
     "ty>=0.0.1a16",
+    "matplotlib>=3.10.8",
+    "tokenizers>=0.23.1",
+    "pyarrow>=25.0.0",
+    "huggingface-hub>=1.24.0",
 ]
 
 [build-system]
@@ -41,12 +45,15 @@ addopts = "-s"
 [tool.ruff]
 line-length = 120
 
-[tool.ruff.lint.extend-per-file-ignores]
-# Also ignore `E402` in all `__init__.py` files.
-"__init__.py" = ["E402", "F401", "F403", "E501"]
-
 [tool.ruff.lint]
-extend-select = ["UP"]
+# Pinned explicitly so the rule set does not drift with the ruff version.
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PERF", "FURB"]
 ignore = [
-    "F722"
+    "F722",     # jaxtyping shape annotations look like forward-ref syntax errors
+    "RUF007",   # zip(x, x[1:]) is clearer than pairwise() for byte-pair scans
 ]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"__init__.py" = ["E402", "F401", "F403", "E501"]
+# tests/ is course-provided starter code; lint it but do not restyle it.
+"tests/**" = ["F403", "F405", "SIM115", "PERF402", "SIM118", "PLR0402", "W605", "UP015", "I001", "B905"]
