@@ -90,7 +90,58 @@ in memory.
 
 ## Results
 
-_Pending — a full TinyStories training run has not been done yet._
+A 92.3M-parameter model trained on OpenWebText for 4.18B tokens (1.53 epochs)
+in **9.2 hours on one RTX 4090**, reaching a validation loss of **3.433**
+(perplexity 30.96).
+
+![OpenWebText training curve](docs/owt_loss.png)
+
+| | |
+|---|---|
+| Parameters | 92.3M — 8 layers, d_model 704, 11 heads (d_k 64), d_ff 1856 |
+| Tokenizer | byte-level BPE, vocab 32000, 4.37 bytes/token |
+| Context / batch | 256 tokens x 96 sequences |
+| Optimiser | AdamW (0.9, 0.95), wd 0.1, grad clip 1.0 |
+| LR schedule | 3e-4 peak, 2000-step warmup, cosine to 3e-5 |
+| Precision | bf16 autocast + `torch.compile` |
+| Throughput | 126k tokens/s, sustained over the full run |
+| Final train / validation | 3.439 / 3.433 |
+
+Train and validation track each other to within 0.006 for the entire run — at
+1.5 epochs the model is still firmly in the underfitting regime, and the curve
+is still descending when the LR schedule ends.
+
+Sampling from the final checkpoint (`temperature 0.8`, `top-p 0.95`):
+
+> **The future of artificial intelligence**, and its co-founder, has been challenged
+> in the past by the lack of a "data-based" solution. [...] The aim of the conference
+> is to show how artificial intelligence is being utilized, and how it is being used
+> in action.
+
+> **The economic outlook for 2027** — "By 2020, the State and the Bank of England will
+> be the largest bank in the world. I am optimistic that, like all other banks, the
+> country will continue to experience a strong recovery and maintain a high level of
+> economic activity," said James Goldstein, chairman of the Bank of England.
+
+Fluent, correctly punctuated, and locally coherent — including invented but
+well-formed attributions. It has no grasp of fact, which is what 92M parameters
+and 4B tokens buys.
+
+### Data preparation
+
+Preparing OpenWebText end to end (11.9 GB of text) takes about 18 minutes on 32
+cores:
+
+| Stage | Time |
+|---|---|
+| Pre-tokenisation (32 processes) | 50 s |
+| BPE training, 31743 merges over 6.6M distinct pre-tokens | 12 m 46 s |
+| Encoding to 2.73B uint16 tokens (16.7M tokens/s) | ~4 m |
+
+The longest tokens the vocabulary learns are runs of repeated characters —
+64-byte rules of `-`, rows of `=` and `_`, and one run of `ÃÂÃÂ...` mojibake.
+That is what OpenWebText actually contains: ASCII separator lines and
+double-encoded UTF-8, both frequent enough for BPE to merge greedily.
 
 ## Layout
 
@@ -107,6 +158,7 @@ scripts/
   sample.py         generate from a checkpoint
   plot_loss.py      loss curves from a run's metrics.jsonl
 notebooks/          exploratory analysis (OpenWebText pre-token statistics)
+docs/               figures used by this README
 tests/              CS336 test suite; adapters.py wires it to this implementation
 ```
 

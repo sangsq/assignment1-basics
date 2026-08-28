@@ -92,9 +92,11 @@ def main() -> None:
                     textcoords="offset points", xytext=(-6, 10), ha="right",
                     color=INK, fontsize=10, fontweight="bold")
         best = min(va_y)
-        ax.annotate(f"best {best:.3f}", (to_b(va_x[va_y.index(best)]), best),
-                    textcoords="offset points", xytext=(-6, -16), ha="right",
-                    color=MUTED, fontsize=9)
+        # Only worth its own label when the run did not end at its best point.
+        if best < va_y[-1] - 5e-4:
+            ax.annotate(f"best {best:.3f}", (to_b(va_x[va_y.index(best)]), best),
+                        textcoords="offset points", xytext=(-6, -16), ha="right",
+                        color=MUTED, fontsize=9)
     leg = ax.legend(frameon=False, loc="upper right", fontsize=10)
     for t in leg.get_texts():
         t.set_color(MUTED)
