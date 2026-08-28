@@ -23,6 +23,7 @@ dependencies = [
     "tokenizers>=0.23.1",
     "pyarrow>=25.0.0",
     "huggingface-hub>=1.24.0",
+    "setuptools",  # triton imports it at runtime; without it torch.compile fails
 ]
 
 [build-system]
