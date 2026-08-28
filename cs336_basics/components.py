@@ -303,8 +303,10 @@ def data_loader(seq, context_length, batch_size, device, rng=None):
     validation is measured on the same windows at every eval step.
     """
     n = len(seq)
-    starts = (rng or np.random).integers(0, n - context_length, size=batch_size) \
-        if rng is not None else np.random.randint(0, n - context_length, size=batch_size)
+    if rng is None:
+        starts = np.random.randint(0, n - context_length, size=batch_size)
+    else:
+        starts = rng.integers(0, n - context_length, size=batch_size)
     tmp = np.empty(shape=(batch_size, context_length + 1), dtype=np.int64)
     for i, idx in enumerate(starts):
         tmp[i, :] = seq[idx:idx + context_length + 1]
