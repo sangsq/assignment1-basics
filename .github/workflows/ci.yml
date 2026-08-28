@@ -23,7 +23,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Lint
-        run: uvx ruff check cs336_basics scripts tests
+        run: uv run ruff check cs336_basics scripts tests
 
       - name: Run tests
         run: uv run pytest -q

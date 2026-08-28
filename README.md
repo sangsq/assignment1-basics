@@ -171,7 +171,7 @@ whatever was stored alongside it.
 
 ```sh
 uv run pytest                   # full suite
-uvx ruff check cs336_basics scripts tests
+uv run ruff check cs336_basics scripts tests
 ```
 
 `tests/` is the unmodified CS336 suite; [tests/adapters.py](tests/adapters.py) is the

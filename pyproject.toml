@@ -1,29 +1,28 @@
 [project]
 name = "cs336_basics"
-version = "1.0.6"
+version = "0.1.0"
 description = "A byte-level BPE tokenizer and decoder-only Transformer LM written from primitives"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "einops>=0.8.1", # tensor operations
-    "einx>=0.3.0", # more general tensor operations
-    "jaxtyping>=0.3.0", # type hints for pytorch/jax/numpy
-    "numpy",
-    "psutil>=6.1.1",
-    "pytest>=8.3.4",
-    "regex>=2024.11.6", # more powerful regex than the builtin `re` module
-    "submitit>=1.5.2", # job submission for SLURM
-    "tiktoken>=0.9.0",
+    "einops>=0.8.1",     # readable tensor reshapes in the model
+    "numpy",             # memmapped token arrays, batch sampling
+    "regex>=2024.11.6",  # pre-tokenisation pattern; the stdlib re cannot express it
     "torch~=2.6.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "torch~=2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'", # Intel Macs
-    "tqdm>=4.67.1",
-    "wandb>=0.19.7",
-    "ty>=0.0.1a16",
-    "matplotlib>=3.10.8",
-    "tokenizers>=0.23.1",
-    "pyarrow>=25.0.0",
-    "huggingface-hub>=1.24.0",
-    "setuptools",  # triton imports it at runtime; without it torch.compile fails
+    "tqdm>=4.67.1",      # BPE merge progress
+    "matplotlib>=3.10.8",# scripts/plot_loss.py
+    "wandb>=0.19.7",     # optional --wandb-project logging, imported lazily
+    "setuptools",        # triton imports it at runtime; without it torch.compile fails
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "ruff>=0.16",        # pinned so CI lint does not drift with new releases
+    "tiktoken>=0.9.0",   # tokenizer tests cross-check against it
+    "jaxtyping>=0.3.0",  # shape annotations in tests/adapters.py
+    "psutil>=6.1.1",     # memory-limit tests
 ]
 
 [build-system]
